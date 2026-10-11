@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Rust / Cargo
+target/
+**/*.rs.bk
+
+# Wasm output
+pkg/
+wasm/
+
+# Build artifacts & caches
+dist/
+build/
+.cache/
+*.log
+
+# Editor & OS files
+.DS_Store
+.vscode/
+.idea/
+*.swp

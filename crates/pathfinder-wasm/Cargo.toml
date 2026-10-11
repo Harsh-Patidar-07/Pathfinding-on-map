@@ -1,0 +1,28 @@
+[package]
+name = "pathfinder-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance geographic pathfinding engine compiled to WebAssembly"
+authors = ["Pathfinder Team"]
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2.100"
+serde = { version = "1.0", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = { version = "0.1", optional = true }
+
+[dev-dependencies]
+serde_json = "1.0"
+
+[features]
+default = ["console_error_panic_hook"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

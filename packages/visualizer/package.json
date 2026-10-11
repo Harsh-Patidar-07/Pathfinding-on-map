@@ -1,0 +1,9 @@
+{
+  "name": "@pathfinder/visualizer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MapLibre GL + Deck.gl pathfinding visualizer component",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {}
+}

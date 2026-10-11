@@ -1,0 +1,9 @@
+{
+  "name": "@pathfinder/connector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript Web Worker bridge for Pathfinder Wasm memory",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {}
+}

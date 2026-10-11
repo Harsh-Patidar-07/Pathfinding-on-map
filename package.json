@@ -1,0 +1,15 @@
+{
+  "name": "pathfinding-world-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "High-performance web-based geographic pathfinding visualizer",
+  "scripts": {
+    "test:crates": "cargo test --manifest-path crates/pathfinder-wasm/Cargo.toml",
+    "build:wasm": "wasm-pack build crates/pathfinder-wasm --target web --out-dir ../../packages/connector/wasm",
+    "build:crates": "cargo build --manifest-path crates/pathfinder-wasm/Cargo.toml --target wasm32-unknown-unknown --release"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "pnpm@12.11.2"
+}
