@@ -11,6 +11,7 @@ pub mod engine;
 pub mod geo;
 pub mod graph;
 pub mod search;
+pub mod wasm;
 
 // Re-exports
 pub use astar::AStar;
@@ -24,3 +25,4 @@ pub use geo::{
 };
 pub use graph::Graph;
 pub use search::{SearchStatus, SteppableSearch};
+pub use wasm::WasmPathfinder;
