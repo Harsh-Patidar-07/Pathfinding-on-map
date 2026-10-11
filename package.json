@@ -4,10 +4,11 @@
   "private": true,
   "description": "High-performance web-based geographic pathfinding visualizer",
   "scripts": {
-    "build": "pnpm run build:wasm && pnpm --filter @pathfinder/connector build",
-    "test": "pnpm run test:crates && pnpm --filter @pathfinder/connector test",
+    "build": "pnpm run build:wasm && pnpm --filter @pathfinder/connector build && pnpm --filter @pathfinder/visualizer build",
+    "test": "pnpm run test:crates && pnpm --filter @pathfinder/connector test && pnpm --filter @pathfinder/visualizer test",
     "test:crates": "cargo test --manifest-path crates/pathfinder-wasm/Cargo.toml",
     "test:connector": "pnpm --filter @pathfinder/connector test",
+    "test:visualizer": "pnpm --filter @pathfinder/visualizer test",
     "build:wasm": "wasm-pack build crates/pathfinder-wasm --target web --out-dir ../../packages/connector/wasm",
     "build:crates": "cargo build --manifest-path crates/pathfinder-wasm/Cargo.toml --target wasm32-unknown-unknown --release"
   },

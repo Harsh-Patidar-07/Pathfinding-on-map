@@ -2,8 +2,33 @@
   "name": "@pathfinder/visualizer",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "MapLibre GL + Deck.gl pathfinding visualizer component",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
-  "scripts": {}
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsx tests/osm.test.ts"
+  },
+  "dependencies": {
+    "@deck.gl/core": "^9.4.0",
+    "@deck.gl/layers": "^9.4.0",
+    "@deck.gl/mapbox": "^9.4.0",
+    "@pathfinder/connector": "workspace:*",
+    "maplibre-gl": "^6.13.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^5.7.0"
+  }
 }
