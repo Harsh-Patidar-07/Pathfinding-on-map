@@ -3,7 +3,12 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable",
+      "WebWorker"
+    ],
     "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
@@ -12,6 +17,7 @@
   },
   "include": [
     "packages/*/src/**/*",
-    "packages/*/tests/**/*"
+    "packages/*/tests/**/*",
+    "apps/*/src/**/*"
   ]
 }

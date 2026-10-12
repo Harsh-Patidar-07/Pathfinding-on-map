@@ -266,12 +266,12 @@ async function runTests() {
   assert(visitedView !== null && visitedView.length > 0, 'getVisitedEdgesView should return populated view');
 
   connector.terminate();
-  console.log(`✅ PathfinderConnector playback passed with ${stepEventsCount} animation steps!`);
+  console.log(`! PathfinderConnector playback passed with ${stepEventsCount} animation steps!`);
 
-  console.log('\n🎉 ALL PHASE 2 TESTS PASSED SUCCESSFULLY!');
+  console.log('\nALL PHASE 2 TESTS PASSED SUCCESSFULLY!');
 }
 
 runTests().catch((err) => {
-  console.error('❌ Test failed with error:', err);
+  console.error('Test failed with error:', err);
   process.exit(1);
 });

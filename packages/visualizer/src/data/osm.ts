@@ -1,3 +1,4 @@
+import { PARIS_OSM_DATA } from "./paris_osm_graph.js";
 /**
  * OpenStreetMap (OSM) Overpass road ingestion and flat CSR graph builder.
  */
@@ -90,9 +91,10 @@ out skel qt;`;
  * Default public Overpass API endpoints.
  */
 export const DEFAULT_OVERPASS_ENDPOINTS = [
+  '/api/overpass',
+  'https://lz4.overpass-api.de/api/interpreter',
+  'https://overpass.osm.ch/api/interpreter',
   'https://overpass-api.de/api/interpreter',
-  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
 ];
 
 /**
@@ -463,6 +465,11 @@ export async function fetchOSMRoadNetwork(
   let lastError: Error | null = null;
 
   for (const endpoint of endpoints) {
+    if (endpoint.startsWith('/') && typeof window === 'undefined') {
+      continue;
+    }
+    const timeoutController = new AbortController();
+    const timer = setTimeout(() => timeoutController.abort(), 6000);
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -470,8 +477,9 @@ export async function fetchOSMRoadNetwork(
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: `data=${encodeURIComponent(query)}`,
-        signal: options?.signal,
+        signal: options?.signal || timeoutController.signal,
       });
+      clearTimeout(timer);
 
       if (!response.ok) {
         throw new Error(`Overpass HTTP ${response.status}: ${response.statusText}`);
@@ -494,4 +502,23 @@ export async function fetchOSMRoadNetwork(
   }
 
   throw lastError ?? new Error('Failed to fetch OSM road network from Overpass API');
+}
+
+/**
+ * Loads the pre-bundled real OpenStreetMap road network for Central Paris.
+ * Contains 6,392 real road nodes and 10,829 directed street edges covering
+ * Louvre, Seine bridges, Notre-Dame, and the Latin Quarter.
+ */
+export function getParisRoadNetwork(): OSMGraph {
+  const spatialIndex = new SpatialIndex(PARIS_OSM_DATA.nodeCoordinates);
+  return {
+    nodeCoordinates: PARIS_OSM_DATA.nodeCoordinates,
+    offsets: PARIS_OSM_DATA.offsets,
+    targets: PARIS_OSM_DATA.targets,
+    weights: PARIS_OSM_DATA.weights,
+    nodeCount: PARIS_OSM_DATA.nodeCount,
+    edgeCount: PARIS_OSM_DATA.edgeCount,
+    bbox: PARIS_OSM_DATA.bbox,
+    spatialIndex,
+  };
 }

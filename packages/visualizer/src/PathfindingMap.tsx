@@ -29,12 +29,40 @@ interface RoadEdge {
   target: [number, number]; // [lon, lat]
 }
 
-const DEFAULT_MAP_STYLE =
-  'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
+export const DEFAULT_MAP_STYLE: any = {
+  version: 8,
+  sources: {
+    'osm-tiles': {
+      type: 'raster',
+      tiles: [
+        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      ],
+      tileSize: 256,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors',
+    },
+  },
+  layers: [
+    {
+      id: 'osm-tiles-layer',
+      type: 'raster',
+      source: 'osm-tiles',
+      paint: {
+        'raster-saturation': -0.85,
+        'raster-contrast': 0.25,
+        'raster-brightness-max': 0.55,
+      },
+      minzoom: 0,
+      maxzoom: 19,
+    },
+  ],
+};
 
 export const PathfindingMap: React.FC<PathfindingMapProps> = ({
   graph,
   connector: externalConnector,
+  startNode: externalStartNode,
+  targetNode: externalTargetNode,
   algorithm: initialAlgorithm = SearchAlgorithm.AStarEuclidean,
   bidirectional: initialBidirectional = false,
   batchSize: initialBatchSize = 64,
@@ -58,9 +86,12 @@ export const PathfindingMap: React.FC<PathfindingMapProps> = ({
   const [isBidirectional, setIsBidirectional] = useState<boolean>(initialBidirectional);
   const [batchSize, setBatchSize] = useState<number>(initialBatchSize);
 
-  // Node selection state
-  const [startNode, setStartNode] = useState<number | null>(null);
-  const [targetNode, setTargetNode] = useState<number | null>(null);
+  // Node selection state (support controlled and uncontrolled)
+  const [internalStartNode, setInternalStartNode] = useState<number | null>(null);
+  const [internalTargetNode, setInternalTargetNode] = useState<number | null>(null);
+
+  const startNode = externalStartNode !== undefined ? externalStartNode : internalStartNode;
+  const targetNode = externalTargetNode !== undefined ? externalTargetNode : internalTargetNode;
 
   // Search progress state
   const [visitedEdgeIds, setVisitedEdgeIds] = useState<Uint32Array>(new Uint32Array(0));
@@ -72,6 +103,16 @@ export const PathfindingMap: React.FC<PathfindingMapProps> = ({
   // Internal connector instance if none provided
   const internalConnectorRef = useRef<PathfinderConnector | null>(null);
   const connector = externalConnector ?? internalConnectorRef.current;
+
+  // Sync references for event listeners
+  const startNodeRef = useRef(startNode);
+  startNodeRef.current = startNode;
+  const targetNodeRef = useRef(targetNode);
+  targetNodeRef.current = targetNode;
+  const searchStatusRef = useRef(searchStatus);
+  searchStatusRef.current = searchStatus;
+  const graphRef = useRef(graph);
+  graphRef.current = graph;
 
   // 1. Initialize internal connector if needed
   useEffect(() => {
@@ -136,14 +177,14 @@ export const PathfindingMap: React.FC<PathfindingMapProps> = ({
         weights: graph.weights,
       })
       .then(() => {
-        // Automatically default start and target to first and last node if not set
-        if (startNode === null && targetNode === null && graph.nodeCount >= 2) {
-          setStartNode(0);
-          setTargetNode(graph.nodeCount - 1);
+        // Default start and target if completely unselected
+        if (startNodeRef.current === null && targetNodeRef.current === null && graph.nodeCount >= 2) {
+          if (externalStartNode === undefined) setInternalStartNode(0);
+          if (externalTargetNode === undefined) setInternalTargetNode(graph.nodeCount - 1);
         }
       })
       .catch((err) => console.error('Error loading graph into connector:', err));
-  }, [connector, graph]);
+  }, [connector, graph, externalStartNode, externalTargetNode]);
 
   // 4. Initialize MapLibre GL & Deck.gl Overlay
   useEffect(() => {
@@ -151,7 +192,6 @@ export const PathfindingMap: React.FC<PathfindingMapProps> = ({
 
     let center: [number, number] = initialCenter ?? [0, 0];
     if (!initialCenter && graph && graph.nodeCount > 0) {
-      // Use center of graph bbox
       const [south, west, north, east] = graph.bbox;
       center = [(west + east) / 2, (south + north) / 2];
     }
@@ -173,45 +213,57 @@ export const PathfindingMap: React.FC<PathfindingMapProps> = ({
 
     map.addControl(overlay as any);
 
+    const resizeObserver = new ResizeObserver(() => {
+      map.resize();
+    });
+    if (mapContainerRef.current) {
+      resizeObserver.observe(mapContainerRef.current);
+    }
+    map.on('load', () => {
+      map.resize();
+    });
+
     mapRef.current = map;
     overlayRef.current = overlay;
 
     // Map Click Listener to select Start / Target nodes via Spatial Index
     map.on('click', (e) => {
-      if (!graph || !graph.spatialIndex) return;
+      const g = graphRef.current;
+      if (!g || !g.spatialIndex) return;
       const clickedLat = e.lngLat.lat;
       const clickedLon = e.lngLat.lng;
 
-      const nearestNode = graph.spatialIndex.findNearestNode(
+      const nearestNode = g.spatialIndex.findNearestNode(
         clickedLat,
         clickedLon
       );
       if (nearestNode === -1) return;
 
-      const nodeLat = graph.nodeCoordinates[nearestNode * 2];
-      const nodeLon = graph.nodeCoordinates[nearestNode * 2 + 1];
+      const nodeLat = g.nodeCoordinates[nearestNode * 2];
+      const nodeLon = g.nodeCoordinates[nearestNode * 2 + 1];
 
-      // Alternate selection or restart
-      setStartNode((prevStart) => {
-        if (prevStart === null || (targetNode !== null && searchStatus === SearchStatus.Found)) {
-          // Setting new start
-          setTargetNode(null);
-          setVisitedEdgeIds(new Uint32Array(0));
-          setFinalPathNodes(new Uint32Array(0));
-          setSearchStatus(SearchStatus.NotStarted);
-          setPathCost(-1);
-          onNodeSelect?.('start', nearestNode, [nodeLat, nodeLon]);
-          return nearestNode;
-        } else {
-          // Setting target
-          setTargetNode(nearestNode);
-          onNodeSelect?.('target', nearestNode, [nodeLat, nodeLon]);
-          return prevStart;
-        }
-      });
+      const currentStart = startNodeRef.current;
+      const currentTarget = targetNodeRef.current;
+      const currentStatus = searchStatusRef.current;
+
+      if (currentStart === null || currentTarget !== null) {
+        // Setting new start
+        if (externalStartNode === undefined) setInternalStartNode(nearestNode);
+        if (externalTargetNode === undefined) setInternalTargetNode(null);
+        setVisitedEdgeIds(new Uint32Array(0));
+        setFinalPathNodes(new Uint32Array(0));
+        setSearchStatus(SearchStatus.NotStarted);
+        setPathCost(-1);
+        onNodeSelect?.('start', nearestNode, [nodeLat, nodeLon]);
+      } else {
+        // Setting target
+        if (externalTargetNode === undefined) setInternalTargetNode(nearestNode);
+        onNodeSelect?.('target', nearestNode, [nodeLat, nodeLon]);
+      }
     });
 
     return () => {
+      resizeObserver.disconnect();
       if (overlayRef.current && mapRef.current) {
         mapRef.current.removeControl(overlayRef.current as any);
       }
@@ -389,8 +441,8 @@ export const PathfindingMap: React.FC<PathfindingMapProps> = ({
         isRunning: res.isRunning,
         isFound: res.isFound,
         status: res.status,
-        startNode,
-        targetNode,
+        startNode: startNodeRef.current,
+        targetNode: targetNodeRef.current,
       };
       onStatsUpdate?.(stats);
     });
@@ -401,11 +453,20 @@ export const PathfindingMap: React.FC<PathfindingMapProps> = ({
       onSearchComplete?.(comp);
     });
 
+    const unsubReset = connector.onReset?.(() => {
+      setVisitedEdgeIds(new Uint32Array(0));
+      setFinalPathNodes(new Uint32Array(0));
+      setSearchStatus(SearchStatus.NotStarted);
+      setPathCost(-1);
+      setIsPlaying(false);
+    });
+
     return () => {
       unsubStep();
       unsubComplete();
+      unsubReset?.();
     };
-  }, [connector, startNode, targetNode, onStatsUpdate, onSearchComplete]);
+  }, [connector, onStatsUpdate, onSearchComplete]);
 
   // 7. Playback Actions
   const handleStartOrResume = useCallback(async () => {
@@ -620,109 +681,88 @@ export const PathfindingMap: React.FC<PathfindingMapProps> = ({
                   cursor: 'pointer',
                 }}
               >
-                ⏸ Pause
+                Pause
               </button>
             ) : (
               <button
                 onClick={handleStartOrResume}
-                disabled={startNode === null || targetNode === null}
                 style={{
                   flex: 1,
                   padding: '7px 12px',
-                  backgroundColor: startNode !== null && targetNode !== null ? '#38bdf8' : '#334155',
-                  color: startNode !== null && targetNode !== null ? '#0f172a' : '#64748b',
+                  backgroundColor: '#0284c7',
+                  color: '#ffffff',
                   fontWeight: 600,
                   fontSize: '13px',
                   border: 'none',
                   borderRadius: '6px',
-                  cursor: startNode !== null && targetNode !== null ? 'pointer' : 'not-allowed',
+                  cursor: 'pointer',
                 }}
               >
-                ▶ Play
+                {searchStatus === SearchStatus.NotStarted ? 'Run Search' : 'Resume'}
               </button>
             )}
-
             <button
               onClick={handleStepOnce}
-              disabled={isPlaying || startNode === null || targetNode === null}
+              disabled={isPlaying || searchStatus === SearchStatus.Found || searchStatus === SearchStatus.NotFound}
               style={{
                 padding: '7px 12px',
                 backgroundColor: 'rgba(51, 65, 85, 0.8)',
-                color: '#f8fafc',
+                color: '#e2e8f0',
                 fontSize: '13px',
                 border: '1px solid rgba(255, 255, 255, 0.1)',
                 borderRadius: '6px',
-                cursor: 'pointer',
+                cursor: isPlaying ? 'not-allowed' : 'pointer',
               }}
             >
-              ⏭ Step
+              Step
             </button>
-
             <button
               onClick={handleReset}
               style={{
                 padding: '7px 12px',
-                backgroundColor: 'rgba(51, 65, 85, 0.8)',
-                color: '#f8fafc',
+                backgroundColor: 'rgba(71, 85, 105, 0.8)',
+                color: '#e2e8f0',
                 fontSize: '13px',
                 border: '1px solid rgba(255, 255, 255, 0.1)',
                 borderRadius: '6px',
                 cursor: 'pointer',
               }}
             >
-              🔄 Reset
+              Reset
             </button>
           </div>
 
-          {/* Real-time Stats Grid */}
+          {/* Live Telemetry Readout */}
           <div
             style={{
+              borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+              paddingTop: 10,
+              fontSize: '12px',
               display: 'grid',
               gridTemplateColumns: '1fr 1fr',
-              gap: '8px',
-              padding: '10px',
-              backgroundColor: 'rgba(15, 23, 42, 0.6)',
-              borderRadius: '8px',
-              fontSize: '12px',
-              border: '1px solid rgba(255, 255, 255, 0.05)',
+              gap: '6px 12px',
             }}
           >
             <div>
-              <span style={{ color: '#94a3b8', display: 'block' }}>Explored Edges</span>
+              <span style={{ color: '#94a3b8' }}>Visited Edges: </span>
               <span style={{ fontWeight: 600, color: '#38bdf8' }}>
                 {visitedEdgeIds.length.toLocaleString()}
               </span>
             </div>
             <div>
-              <span style={{ color: '#94a3b8', display: 'block' }}>Shortest Distance</span>
+              <span style={{ color: '#94a3b8' }}>Path Distance: </span>
               <span style={{ fontWeight: 600, color: '#4ade80' }}>
                 {formatDistance(pathCost)}
               </span>
             </div>
             <div>
-              <span style={{ color: '#94a3b8', display: 'block' }}>Start Node</span>
-              <span style={{ fontWeight: 500, color: '#f8fafc' }}>
-                {startNode !== null ? `#${startNode}` : 'Not set'}
-              </span>
+              <span style={{ color: '#94a3b8' }}>Start Node: </span>
+              <span>{startNode !== null ? `#${startNode}` : 'None'}</span>
             </div>
             <div>
-              <span style={{ color: '#94a3b8', display: 'block' }}>Target Node</span>
-              <span style={{ fontWeight: 500, color: '#f8fafc' }}>
-                {targetNode !== null ? `#${targetNode}` : 'Not set'}
-              </span>
+              <span style={{ color: '#94a3b8' }}>Target Node: </span>
+              <span>{targetNode !== null ? `#${targetNode}` : 'None'}</span>
             </div>
-          </div>
-
-          {/* Interactive Hint */}
-          <div
-            style={{
-              marginTop: 10,
-              fontSize: '11px',
-              color: '#64748b',
-              textAlign: 'center',
-            }}
-          >
-            💡 Click on map to place Start 🟢 & Target 🔴 points
           </div>
         </div>
       )}

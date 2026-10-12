@@ -19,6 +19,7 @@ import {
 export class PathfinderWorkerHandler {
   private wasmInstance: InitOutput | null = null;
   private pathfinder: WasmPathfinder | null = null;
+  private initPromise: Promise<void> | null = null;
 
   /**
    * Initializes Wasm module and Pathfinder instance.
@@ -27,9 +28,18 @@ export class PathfinderWorkerHandler {
     wasmBinary?: ArrayBuffer | Uint8Array,
     wasmUrl?: string
   ): Promise<void> {
+    if (this.wasmInstance && this.pathfinder) {
+      return;
+    }
     const input = wasmBinary ?? wasmUrl;
     if (input) {
-      this.wasmInstance = await init({ module_or_path: input as any });
+      if (typeof input === 'string') {
+        const res = await fetch(input);
+        const bytes = await res.arrayBuffer();
+        this.wasmInstance = await init({ module_or_path: bytes });
+      } else {
+        this.wasmInstance = await init({ module_or_path: input as any });
+      }
     } else {
       this.wasmInstance = await init();
     }
@@ -184,12 +194,18 @@ export class PathfinderWorkerHandler {
     postResponse: (response: WorkerMessageOut) => void
   ): Promise<void> {
     try {
+      if (msg.type === 'INIT') {
+        this.initPromise = this.init(msg.wasmBinary, msg.wasmUrl);
+        await this.initPromise;
+        postResponse({ id: msg.id, type: 'INIT_OK' });
+        return;
+      }
+
+      if (this.initPromise) {
+        await this.initPromise;
+      }
+
       switch (msg.type) {
-        case 'INIT': {
-          await this.init(msg.wasmBinary, msg.wasmUrl);
-          postResponse({ id: msg.id, type: 'INIT_OK' });
-          break;
-        }
 
         case 'LOAD_GRAPH': {
           const { coords, offsets, targets, weights } = msg.graph;
@@ -252,23 +268,11 @@ export class PathfinderWorkerHandler {
 // Worker Global Scope Binding
 // Automatically activates when executed inside a Web Worker thread:
 // ----------------------------------------------------------------------------
-const globalScope: any =
-  typeof self !== 'undefined'
-    ? self
-    : typeof globalThis !== 'undefined'
-    ? globalThis
-    : null;
-
-if (
-  globalScope &&
-  typeof globalScope.postMessage === 'function' &&
-  (typeof globalScope.importScripts === 'function' ||
-    typeof globalScope.WorkerGlobalScope !== 'undefined')
-) {
+if (typeof self !== 'undefined' && typeof (self as any).postMessage === 'function') {
   const handler = new PathfinderWorkerHandler();
-  globalScope.onmessage = (event: MessageEvent<WorkerMessageIn>) => {
+  self.onmessage = (event: MessageEvent<WorkerMessageIn>) => {
     handler.handleMessage(event.data, (res) => {
-      globalScope.postMessage(res);
+      self.postMessage(res);
     });
   };
 }

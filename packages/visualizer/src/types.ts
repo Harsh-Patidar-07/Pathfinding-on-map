@@ -1,6 +1,5 @@
 /**
- * Visualizer component types and props.
- */
+ * Visualizer component types and props.\n */
 
 import type { CSSProperties } from 'react';
 import type {
@@ -26,6 +25,10 @@ export interface PathfindingMapProps {
   graph?: OSMGraph;
   /** Pathfinder connector bridge instance */
   connector?: PathfinderConnector;
+  /** Controlled start node index */
+  startNode?: number | null;
+  /** Controlled target node index */
+  targetNode?: number | null;
   /** Active search algorithm */
   algorithm?: SearchAlgorithm;
   /** Whether to run bidirectional frontier */

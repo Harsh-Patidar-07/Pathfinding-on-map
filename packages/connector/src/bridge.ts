@@ -19,6 +19,8 @@ import { PathfinderWorkerHandler } from './worker.js';
 export interface ConnectorOptions {
   /** Optional pre-created Web Worker instance */
   worker?: Worker;
+  /** Optional factory function to create a new Web Worker instance (recommended for React) */
+  workerFactory?: () => Worker;
   /** Optional URL or path to worker script */
   workerUrl?: string | URL;
   /** Preloaded Wasm binary (ArrayBuffer or Uint8Array) */
@@ -40,6 +42,7 @@ export interface ConnectorOptions {
 export type StepCallback = (result: StepResult) => void;
 export type CompleteCallback = (result: CompleteResult) => void;
 export type ErrorCallback = (error: Error) => void;
+export type ResetCallback = () => void;
 
 /**
  * High-level TypeScript controller for Pathfinder.
@@ -61,12 +64,14 @@ export class PathfinderConnector {
   private stepListeners = new Set<StepCallback>();
   private completeListeners = new Set<CompleteCallback>();
   private errorListeners = new Set<ErrorCallback>();
+  private resetListeners = new Set<ResetCallback>();
 
   private isRunningSearch = false;
   private playbackTimer: any = null;
   private currentStatus: SearchStatus = SearchStatus.NotStarted;
   private lastStepResult: StepResult | null = null;
   private isTerminated = false;
+  private initPromise: Promise<void> | null = null;
 
   constructor(options: ConnectorOptions = {}) {
     this.options = {
@@ -81,48 +86,72 @@ export class PathfinderConnector {
    * Initializes the connector and starts the worker or direct engine.
    */
   public async init(): Promise<void> {
-    if (this.options.directMode) {
-      this.directHandler = new PathfinderWorkerHandler();
-      await this.directHandler.init(
-        this.options.wasmBinary,
-        this.options.wasmUrl
-      );
-      return;
+    if (this.initPromise && !this.isTerminated && (this.worker || this.directHandler)) {
+      return this.initPromise;
     }
 
-    // Worker mode
-    if (this.options.worker) {
-      this.worker = this.options.worker;
-    } else if (this.options.workerUrl) {
-      this.worker = new Worker(this.options.workerUrl, { type: 'module' });
-    } else if (typeof Worker !== 'undefined') {
-      // Default to bundling worker URL relative to this module
-      const defaultWorkerUrl = new URL('./worker.js', import.meta.url);
-      this.worker = new Worker(defaultWorkerUrl, { type: 'module' });
-    } else {
-      // Fallback to direct mode if Worker is unavailable in environment (e.g. Node.js tests)
-      this.directHandler = new PathfinderWorkerHandler();
-      await this.directHandler.init(
-        this.options.wasmBinary,
-        this.options.wasmUrl
-      );
-      return;
-    }
+    this.isTerminated = false;
 
-    this.worker.onmessage = (event: MessageEvent<WorkerMessageOut>) => {
-      this.handleWorkerMessage(event.data);
-    };
+    this.initPromise = (async () => {
+      let wasmBinary = this.options.wasmBinary;
 
-    this.worker.onerror = (err) => {
-      const error = new Error(`Worker error: ${err.message || 'Unknown error'}`);
-      this.emitError(error);
-    };
+      if (!wasmBinary && this.options.wasmUrl) {
+        try {
+          const res = await fetch(this.options.wasmUrl);
+          if (res.ok) {
+            wasmBinary = await res.arrayBuffer();
+          }
+        } catch (e) {
+          console.warn("Could not pre-fetch wasm binary in main thread:", e);
+        }
+      }
 
-    await this.postMessageAsync({
-      type: 'INIT',
-      wasmBinary: this.options.wasmBinary,
-      wasmUrl: this.options.wasmUrl,
-    });
+      if (this.options.directMode) {
+        this.directHandler = new PathfinderWorkerHandler();
+        await this.directHandler.init(
+          wasmBinary,
+          this.options.wasmUrl
+        );
+        return;
+      }
+
+      // Worker mode: create or assign worker
+      if (this.options.workerFactory) {
+        this.worker = this.options.workerFactory();
+      } else if (this.options.worker) {
+        this.worker = this.options.worker;
+      } else if (this.options.workerUrl) {
+        this.worker = new Worker(this.options.workerUrl, { type: 'module' });
+      } else if (typeof Worker !== 'undefined') {
+        const defaultWorkerUrl = new URL('./worker.js', import.meta.url);
+        this.worker = new Worker(defaultWorkerUrl, { type: 'module' });
+      } else {
+        // Fallback to direct mode if Worker is unavailable in environment (e.g. Node.js tests)
+        this.directHandler = new PathfinderWorkerHandler();
+        await this.directHandler.init(
+          wasmBinary,
+          this.options.wasmUrl
+        );
+        return;
+      }
+
+      this.worker.onmessage = (event: MessageEvent<WorkerMessageOut>) => {
+        this.handleWorkerMessage(event.data);
+      };
+
+      this.worker.onerror = (err) => {
+        const error = new Error(`Worker error: ${err.message || 'Unknown error'}`);
+        this.emitError(error);
+      };
+
+      await this.postMessageAsync({
+        type: 'INIT',
+        wasmBinary,
+        wasmUrl: this.options.wasmUrl,
+      });
+    })();
+
+    return this.initPromise;
   }
 
   /**
@@ -131,6 +160,8 @@ export class PathfinderConnector {
   public async loadGraph(
     graph: GraphData
   ): Promise<{ nodeCount: number; edgeCount: number; nodesPtr: number; nodesLen: number }> {
+    await this.init();
+
     if (this.directHandler) {
       const res = this.directHandler.loadGraph(
         graph.coords,
@@ -152,6 +183,8 @@ export class PathfinderConnector {
    * Initiates a new pathfinding query.
    */
   public async startSearch(options: SearchOptions): Promise<SearchStatus> {
+    await this.init();
+
     this.pause();
     const algorithm = options.algorithm ?? SearchAlgorithm.Dijkstra;
     const bidirectional = options.bidirectional ?? false;
@@ -287,6 +320,8 @@ export class PathfinderConnector {
    * Resets the active search query.
    */
   public async reset(): Promise<void> {
+    await this.init();
+
     this.pause();
     this.isRunningSearch = false;
     this.lastStepResult = null;
@@ -294,10 +329,17 @@ export class PathfinderConnector {
 
     if (this.directHandler) {
       this.directHandler.reset();
-      return;
+    } else {
+      await this.postMessageAsync({ type: 'RESET' });
     }
 
-    await this.postMessageAsync({ type: 'RESET' });
+    for (const listener of this.resetListeners) {
+      try {
+        listener();
+      } catch (err) {
+        console.error('Error in reset listener:', err);
+      }
+    }
   }
 
   /**
@@ -314,6 +356,14 @@ export class PathfinderConnector {
   public onComplete(callback: CompleteCallback): () => void {
     this.completeListeners.add(callback);
     return () => this.completeListeners.delete(callback);
+  }
+
+  /**
+   * Subscribes to reset events. Returns unsubscribe function.
+   */
+  public onReset(callback: ResetCallback): () => void {
+    this.resetListeners.add(callback);
+    return () => this.resetListeners.delete(callback);
   }
 
   /**
@@ -375,7 +425,9 @@ export class PathfinderConnector {
     this.directHandler = null;
     this.stepListeners.clear();
     this.completeListeners.clear();
+    this.resetListeners.clear();
     this.errorListeners.clear();
+    this.initPromise = null;
   }
 
   // --------------------------------------------------------------------------
@@ -401,7 +453,21 @@ export class PathfinderConnector {
     const msg = { ...msgPayload, id } as WorkerMessageIn;
 
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error(`Worker request ${msgPayload.type} timed out`));
+      }, 15000);
+
+      this.pendingRequests.set(id, {
+        resolve: (val) => {
+          clearTimeout(timeout);
+          resolve(val);
+        },
+        reject: (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        },
+      });
       this.worker!.postMessage(msg);
     });
   }

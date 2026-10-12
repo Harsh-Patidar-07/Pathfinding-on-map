@@ -19,7 +19,8 @@
     "./wasm": {
       "import": "./wasm/pathfinder_wasm.js",
       "types": "./wasm/pathfinder_wasm.d.ts"
-    }
+    },
+    "./wasm/*": "./wasm/*"
   },
   "scripts": {
     "build": "tsc",
